@@ -5,9 +5,21 @@ Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
+
 var _jmEcs = require('jm-ecs');
 
 var _jmEcs2 = _interopRequireDefault(_jmEcs);
+
+var _jmLogger = require('jm-logger');
+
+var _jmLogger2 = _interopRequireDefault(_jmLogger);
+
+var _jmUtils = require('jm-utils');
+
+var _lodash = require('lodash');
+
+var _lodash2 = _interopRequireDefault(_lodash);
 
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
@@ -17,23 +29,237 @@ function _possibleConstructorReturn(self, call) { if (!self) { throw new Referen
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
 
-var Area = function (_ECS$C) {
-  _inherits(Area, _ECS$C);
+var logger = _jmLogger2.default.getLogger('area');
 
-  function Area(e, opts) {
-    _classCallCheck(this, Area);
+var State = {
+  closed: 0, // 关闭
+  open: 1, // 开放
+  paused: 2 // 暂停
+};
 
-    return _possibleConstructorReturn(this, (Area.__proto__ || Object.getPrototypeOf(Area)).call(this, e, opts));
+var C = function (_ECS$C) {
+  _inherits(C, _ECS$C);
+
+  function C(e) {
+    var opts = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
+
+    _classCallCheck(this, C);
+
+    var _this = _possibleConstructorReturn(this, (C.__proto__ || Object.getPrototypeOf(C)).call(this, e, opts));
+
+    opts.id && (e.id = opts.id);
+    e.State = State;
+    e.maxPlayers = opts.maxPlayers || 5; // 最大玩家数上限
+    e.runTime = 0; // 运行时间
+    e.ticks = 0; // 更新次数
+    e.players = {}; // 所有玩家
+    e.state = State.closed;
+
+    Object.defineProperty(e, 'entities', {
+      get: function () {
+        var bJSON = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+        var v = this.em.entities;
+        var ret = [];
+        for (var key in v) {
+          var o = v[key];
+          if (o === this) continue;
+          if (bJSON) {
+            ret.push(o.toJSON());
+          } else {
+            ret.push(o);
+          }
+        }
+        return ret;
+      }.bind(e)
+    });
+    Object.defineProperty(e, 'totalPlayers', {
+      get: function () {
+        return Object.keys(this.players).length;
+      }.bind(e)
+    });
+    Object.defineProperty(e, 'full', {
+      get: function () {
+        return this.maxPlayers && this.totalPlayers >= this.maxPlayers;
+      }.bind(e)
+    });
+    Object.defineProperty(e, 'empty', {
+      get: function () {
+        return this.totalPlayers === 0;
+      }.bind(e)
+    });
+
+    e.em.on('addEntity', function (o) {
+      o.area = this;
+      if (o.type === 'player') {
+        var players = this.players;
+        var entityId = o.entityId;
+        if (players[entityId]) {
+          logger.warn('add player twice! player: %s', _jmUtils.utils.formatJSON(o.toJSON()));
+          return;
+        }
+        players[entityId] = o;
+        this.emit('addPlayer', o);
+        logger.debug('add player: %s', _jmUtils.utils.formatJSON(o.toJSON()));
+      }
+    }.bind(e));
+
+    e.em.on('removeEntity', function (o) {
+      if (o.type === 'player') {
+        var players = this.players;
+        var entityId = o.entityId;
+        if (!players[entityId]) {
+          logger.warn('remove player not exists! player: %s', _jmUtils.utils.formatJSON(o.toJSON()));
+          return;
+        }
+        delete players[entityId];
+        this.emit('removePlayer', o);
+        logger.debug('remove player: %s', _jmUtils.utils.formatJSON(o.toJSON()));
+      }
+    }.bind(e));
+
+    e.em.on('update', function (fDelta, nDelta) {
+      if (this.state !== State.open) return;
+      this.runTime += nDelta;
+      this.ticks++;
+    }.bind(e));
+
+    e.copyPlayers = function () {
+      var bJSON = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
+
+      var v = this.players;
+      var ret = [];
+      for (var key in v) {
+        var o = v[key];
+        if (bJSON) {
+          ret.push(o.toJSON());
+        } else {
+          ret.push(o);
+        }
+      }
+      return ret;
+    };
+
+    /**
+     * remove entities
+     * @param v
+     */
+    e.removeEntities = function (v) {
+      for (var i in v) {
+        v[i].removeFromParent();
+      }
+    };
+
+    /**
+     * remove entities by type
+     * @param type
+     */
+    e.removeEntitiesByType = function (type) {
+      var v = this.entities;
+      for (var i in v) {
+        var o = v[i];
+        if (o.type === type) {
+          o.removeFromParent();
+        }
+      }
+    };
+
+    e.findPlayerById = function (id) {
+      return _lodash2.default.find(this.players, { id: id });
+    };
+
+    e.open = function () {
+      if (this.state === State.open) {
+        logger.warn('area is already open');
+        return false;
+      }
+      this.runTime = 0;
+      this.ticks = 0;
+      this.state = State.open;
+      this.emit('open');
+      logger.debug('area %j open', this.id);
+      return true;
+    };
+
+    e.close = function () {
+      if (this.state === State.closed) {
+        logger.warn('area is already closed');
+        return false;
+      }
+      this.state = State.closed;
+      this.clear();
+      this.emit('close');
+      logger.debug('area %j closed', this.id);
+      return true;
+    };
+
+    e.pause = function () {
+      if (this.state === State.paused) {
+        logger.warn('area is already paused');
+        return false;
+      }
+      if (this.state === State.closed) {
+        logger.warn('area is closed, can not be pause');
+        return false;
+      }
+      this.state = State.paused;
+      this.emit('pause');
+      logger.debug('area %j paused', this.id);
+      return true;
+    };
+
+    e.resume = function () {
+      if (this.state !== State.paused) {
+        logger.warn('area is not paused, can not be resume');
+        return false;
+      }
+      this.state = State.open;
+      this.emit('resume');
+      logger.debug('area %j resumed', this.id);
+      return true;
+    };
+
+    e.clear = function () {
+      var entities = this.entities;
+      for (var id in entities) {
+        var o = entities[id];
+        o.removeFromParent();
+      }
+    };
+
+    e.toJSON = function () {
+      var o = {
+        type: this.type,
+        entityId: this.entityId, // 实体id
+        id: this.id,
+        state: this.state, // 当前状态
+        runTime: this.runTime, // 运行时间
+        totalPlayers: this.totalPlayers, // 当前房间玩家数
+        maxPlayers: this.maxPlayers, // 房间最大人数上限
+        players: this.copyPlayers(true) // 玩家列表
+      };
+      this.emit('toJSON', o);
+      return o;
+    };
+    return _this;
   }
 
-  return Area;
+  _createClass(C, [{
+    key: 'className',
+    get: function get() {
+      return C.className || C.name;
+    }
+  }]);
+
+  return C;
 }(_jmEcs2.default.C);
 
-Area.class = 'area';
-
-exports.default = Area;
+C.className = 'area';
+C.singleton = true;
+exports.default = C;
 module.exports = exports['default'];
-},{"jm-ecs":10}],2:[function(require,module,exports){
+},{"jm-ecs":10,"jm-logger":19,"jm-utils":20,"lodash":21}],2:[function(require,module,exports){
+(function (global){
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
@@ -48,17 +274,124 @@ var _player = require('./player');
 
 var _player2 = _interopRequireDefault(_player);
 
+var _jmEcs = require('jm-ecs');
+
+var _jmEcs2 = _interopRequireDefault(_jmEcs);
+
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
-var ecs = { Area: _area2.default, Player: _player2.default };
-exports.default = ecs;
+var $ = function $(opts) {
+  var ecs = new _jmEcs2.default().uses([{ class: _area2.default }, { class: _player2.default }]);
+
+  var areas = {};
+  ecs.areas = areas;
+
+  ecs.start = function () {
+    var opts = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+
+    var interval = opts.interval || 100;
+    this.stop();
+    this.updateTime = Date.now();
+    this.timer = setInterval(function () {
+      var t = Date.now();
+      var nDelta = t - this.updateTime;
+      var fDelta = nDelta / 1000;
+      this.updateTime = t;
+      for (var id in areas) {
+        var e = areas[id];
+        e.em.emit('update', fDelta, nDelta);
+      }
+    }.bind(this), interval);
+  };
+
+  ecs.stop = function () {
+    if (!this.timer) return;
+    clearInterval(this.timer);
+    this.timer = null;
+  };
+
+  ecs.start();
+
+  ecs.createArea = function (opts) {
+    var em = this.em();
+    if (!em.entityType('area')) {
+      em.addEntityType('area', {
+        components: {
+          area: {}
+        }
+      });
+    }
+    if (!em.entityType('player')) {
+      em.addEntityType('player', {
+        components: {
+          player: {}
+        }
+      });
+    }
+    var e = em.createEntity('area', opts);
+    areas[e.entityId] = e;
+    return e;
+  };
+
+  ecs.findArea = function (entityId) {
+    return areas[entityId];
+  };
+
+  ecs.findPlayer = function (entityId) {
+    for (var id in areas) {
+      var e = areas[id];
+      var player = e.players[entityId];
+      if (player) return player;
+    }
+    return null;
+  };
+
+  ecs.findPlayerById = function (id) {
+    for (var i in areas) {
+      var players = areas[i].players;
+      for (var j in players) {
+        var player = players[j];
+        if (player.id === id) return player;
+      }
+    }
+    return null;
+  };
+
+  ecs.getPlayers = function () {
+    var players = {};
+    for (var i in areas) {
+      var v = areas[i].players;
+      for (var j in v) {
+        players[j] = v[j];
+      }
+    }
+    return players;
+  };
+
+  return ecs;
+}; /**
+    * 为了简单，设计上 em 与 area 一对一， 即每个 em 只有一个 area，保证了每个 em 中的实体都是 area 或者 属于 area 的实体
+    *
+    */
+
+
+if (typeof global !== 'undefined' && global) {
+  !global.jm && (global.jm = {});
+  !global.jm.game && (global.jm.game = {});
+  global.jm.game.ecs = $;
+}
+
+exports.default = $;
 module.exports = exports['default'];
-},{"./area":1,"./player":3}],3:[function(require,module,exports){
+}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{"./area":1,"./player":3,"jm-ecs":10}],3:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
+
+var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 var _jmEcs = require('jm-ecs');
 
@@ -72,21 +405,42 @@ function _possibleConstructorReturn(self, call) { if (!self) { throw new Referen
 
 function _inherits(subClass, superClass) { if (typeof superClass !== "function" && superClass !== null) { throw new TypeError("Super expression must either be null or a function, not " + typeof superClass); } subClass.prototype = Object.create(superClass && superClass.prototype, { constructor: { value: subClass, enumerable: false, writable: true, configurable: true } }); if (superClass) Object.setPrototypeOf ? Object.setPrototypeOf(subClass, superClass) : subClass.__proto__ = superClass; }
 
-var Player = function (_ECS$C) {
-  _inherits(Player, _ECS$C);
+var C = function (_ECS$C) {
+  _inherits(C, _ECS$C);
 
-  function Player(e, opts) {
-    _classCallCheck(this, Player);
+  function C(e, opts) {
+    _classCallCheck(this, C);
 
-    return _possibleConstructorReturn(this, (Player.__proto__ || Object.getPrototypeOf(Player)).call(this, e, opts));
+    var _this = _possibleConstructorReturn(this, (C.__proto__ || Object.getPrototypeOf(C)).call(this, e, opts));
+
+    opts.id && (e.id = opts.id);
+
+    e.toJSON = function () {
+      var o = {
+        type: this.type,
+        entityId: this.entityId,
+        id: this.id
+      };
+      this.emit('toJSON', o);
+      return o;
+    };
+    return _this;
   }
 
-  return Player;
+  _createClass(C, [{
+    key: 'className',
+    get: function get() {
+      return C.className || C.name;
+    }
+  }]);
+
+  return C;
 }(_jmEcs2.default.C);
 
-Player.class = 'player';
+C.className = 'player';
+C.singleton = true;
 
-exports.default = Player;
+exports.default = C;
 module.exports = exports['default'];
 },{"jm-ecs":10}],4:[function(require,module,exports){
 'use strict';
@@ -116,10 +470,10 @@ var C = function (_Obj) {
   _inherits(C, _Obj);
 
   /**
-     * create a component
-     * @param {E} e entity
-     * @param {Object} opts
-     */
+   * create a component
+   * @param {E} e entity
+   * @param {Object} opts
+   */
   function C(e, opts) {
     _classCallCheck(this, C);
 
@@ -131,34 +485,21 @@ var C = function (_Obj) {
   }
 
   _createClass(C, [{
-    key: 'onUse',
-
-
-    /**
-       * on added to an entity
-       * @param e
-       */
-    value: function onUse(e) {}
-
-    /**
-       * on removed from an entity
-       * @param e
-       */
-
-  }, {
-    key: 'onUnuse',
-    value: function onUnuse(e) {}
-  }, {
     key: 'toJSON',
     value: function toJSON() {
       return {
-        class: C.alias || C.class
+        className: this.className
       };
     }
   }, {
     key: 'entity',
     get: function get() {
       return this._entity;
+    }
+  }, {
+    key: 'className',
+    get: function get() {
+      return C.className || C.name;
     }
   }, {
     key: 'singleton',
@@ -168,7 +509,7 @@ var C = function (_Obj) {
   }, {
     key: 'name',
     get: function get() {
-      return this._name || C.alias || C.class;
+      return this._name || this.className;
     },
     set: function set(v) {
       if (C.nameReadOnly) return;
@@ -179,7 +520,7 @@ var C = function (_Obj) {
   return C;
 }(_obj2.default);
 
-C.class = 'component';
+C.className = 'component';
 C.singleton = false;
 C.nameReadOnly = false;
 
@@ -282,7 +623,7 @@ var ECS = function (_Obj) {
     key: 'use',
     value: function use(C, name) {
       if (!C) throw _jmErr2.default.err(_jmErr2.default.Err.FA_PARAMS);
-      name || (name = C.class || C.name);
+      name || (name = C.className || C.name);
       if (!name) throw _jmErr2.default.err(_jmErr2.default.Err.FA_PARAMS);
       var components = this._components;
       if (components[name]) {
@@ -348,7 +689,7 @@ var ECS = function (_Obj) {
       var components = this._components;
       var C = components[name];
       if (C) {
-        ecs.emit('unuse', name, C);
+        this.emit('unuse', name, C);
       }
       delete components[name];
       return this;
@@ -362,6 +703,11 @@ var ECS = function (_Obj) {
     key: 'em',
     value: function em(opts) {
       return new _em2.default(this, opts);
+    }
+  }, {
+    key: 'toJSON',
+    value: function toJSON() {
+      return { components: this.components };
     }
   }, {
     key: 'components',
@@ -688,6 +1034,14 @@ var EM = function (_Obj) {
       this.emit('update', opts);
     }
   }, {
+    key: 'toJSON',
+    value: function toJSON() {
+      return {
+        ecs: this.ecs,
+        entities: this.entities
+      };
+    }
+  }, {
     key: 'ecs',
     get: function get() {
       return this._ecs;
@@ -724,7 +1078,7 @@ var EM = function (_Obj) {
 
 exports.default = EM;
 module.exports = exports['default'];
-},{"./entity":8,"./factory":9,"./obj":11,"jm-logger":16,"lodash":19}],8:[function(require,module,exports){
+},{"./entity":8,"./factory":9,"./obj":11,"jm-logger":16,"lodash":21}],8:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
@@ -734,6 +1088,10 @@ Object.defineProperty(exports, "__esModule", {
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
 
 var _get = function get(object, property, receiver) { if (object === null) object = Function.prototype; var desc = Object.getOwnPropertyDescriptor(object, property); if (desc === undefined) { var parent = Object.getPrototypeOf(object); if (parent === null) { return undefined; } else { return get(parent, property, receiver); } } else if ("value" in desc) { return desc.value; } else { var getter = desc.get; if (getter === undefined) { return undefined; } return getter.call(receiver); } };
+
+var _lodash = require('lodash');
+
+var _lodash2 = _interopRequireDefault(_lodash);
 
 var _jmTag = require('jm-tag');
 
@@ -828,8 +1186,8 @@ var E = function (_Obj) {
 
       var components = this._components;
       var componentsByClass = this._componentsByClass;
-      name || (name = C.alias || C.class || C.name);
-      var cClassName = C.alias || C.class;
+      name || (name = c.className);
+      var cClassName = c.className;
 
       var bUsedName = name in components;
       if (bUsedName) {
@@ -846,7 +1204,6 @@ var E = function (_Obj) {
       this.addTag(cClassName);
       if (C.alias) this.addTag(C.alias);
 
-      c.onUse(this);
       c.emit('use', this);
       this.emit('use', c);
 
@@ -857,21 +1214,22 @@ var E = function (_Obj) {
     value: function unuse(C_or_name) {
       var components = this._components;
       var componentsByClass = this._componentsByClass;
-      var C = C_or_name;
-      if (typeof C === 'string') {
-        C = components[C];
+      var c = C_or_name;
+      var name = void 0;
+      if (typeof c === 'string') {
+        name = c;
+        c = components[c];
       }
-      if (!C) return this;
+      if (!c) return this;
 
-      var name = c.name;
+      name || (name = c.name);
       var cClassName = c.className;
       var v = componentsByClass[cClassName];
       delete components[name];
       delete v[name];
       delete this[name];
-      this.removeTag(cClassName);
+      if (!v.length) this.removeTag(cClassName);
 
-      c.onUnuse(this);
       c.emit('unuse', this);
       this.emit('unuse', c);
       c.destroy();
@@ -881,7 +1239,7 @@ var E = function (_Obj) {
     key: 'removeChild',
     value: function removeChild(e) {
       this.em.removeEntity(e.entityId);
-      this.children = _.without(this.children, e);
+      this.children = _lodash2.default.without(this.children, e);
       e.destroy();
     }
   }, {
@@ -941,11 +1299,11 @@ var E = function (_Obj) {
       for (var key in target) {
         var t = target[key];
         var o = origin[key];
-        if (_.isObject(t)) {
+        if (_lodash2.default.isObject(t)) {
           if (o) {
             this._clip(o, t);
           }
-          if (_.isEmpty(t)) {
+          if (_lodash2.default.isEmpty(t)) {
             delete target[key];
           }
           continue;
@@ -956,50 +1314,48 @@ var E = function (_Obj) {
         }
       }
     }
+  }, {
+    key: 'toJSON',
+    value: function toJSON() {
+      var type = this.type;
 
-    // toJSON() {
-    //     let em = this.em;
-    //     let type = this.type;
-    //     let et = em.entityType(type);
-    //
-    //     let opts = {
-    //         type: type,
-    //         tags: [],
-    //         components: {}
-    //     };
-    //
-    //     opts.tags = _.cloneDeep(this.tags);
-    //     opts.tags = _.without(opts.tags, type);
-    //
-    //     let cs = opts.components;
-    //     let v = this.components;
-    //     for (let i in v) {
-    //         let c = v[i];
-    //         cs[i] = c.toJSON();
-    //         opts.tags = _.without(opts.tags, i, c.className);
-    //         if (c.classAlias) opts.tags = _.without(opts.tags, c.classAlias);
-    //         if (i === cs[i].className)
-    //             delete cs[i].className;
-    //     }
-    //
-    //     for (let i in et.tags) {
-    //         opts.tags = _.without(opts.tags, et.tags[i]);
-    //     }
-    //     if (!opts.tags.length) delete opts.tags;
-    //
-    //     //去掉entityType中已经定义的相同部分
-    //     this._clip(et, opts);
-    //
-    //     v = this.children;
-    //     for (let i in v) {
-    //         let e = v[i];
-    //         if (!opts.children) opts.children = [];
-    //         opts.children.push(e.toJSON());
-    //     }
-    //
-    //     return opts;
-    // }
+      var opts = {
+        type: type,
+        tags: [],
+        components: {}
+      };
 
+      opts.tags = _lodash2.default.cloneDeep(this.tags);
+      opts.tags = _lodash2.default.without(opts.tags, type);
+
+      var cs = opts.components;
+      var v = this.components;
+      for (var i in v) {
+        var c = v[i];
+        cs[i] = c.toJSON();
+        opts.tags = _lodash2.default.without(opts.tags, i, c.className);
+        if (i === cs[i].className) delete cs[i].className;
+      }
+
+      var et = this.em.entityType(type);
+
+      if (et) {
+        for (var _i in et.tags) {
+          opts.tags = _lodash2.default.without(opts.tags, et.tags[_i]);
+        }
+        // 去掉entityType中已经定义的相同部分
+        this._clip(et, opts);
+      }
+      if (opts.tags && !opts.tags.length) delete opts.tags;
+      v = this.children;
+      for (var _i2 in v) {
+        var e = v[_i2];
+        if (!opts.children) opts.children = [];
+        opts.children.push(e.toJSON());
+      }
+
+      return opts;
+    }
   }, {
     key: 'em',
     get: function get() {
@@ -1025,11 +1381,9 @@ var E = function (_Obj) {
   return E;
 }(_obj2.default);
 
-E._className = 'entity';
-
 exports.default = E;
 module.exports = exports['default'];
-},{"./consts":5,"./obj":11,"jm-err":12,"jm-tag":17}],9:[function(require,module,exports){
+},{"./consts":5,"./obj":11,"jm-err":12,"jm-tag":17,"lodash":21}],9:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
@@ -1092,6 +1446,7 @@ var F = function (_Obj) {
 
           var info = opts.components[name];
           var C = info.className || name;
+          info.className && delete info.className;
           e.use(C, info, name);
         }
       } catch (err) {
@@ -1116,8 +1471,6 @@ var F = function (_Obj) {
 
   return F;
 }(_obj2.default);
-
-F.class = 'factory';
 
 exports.default = F;
 module.exports = exports['default'];
@@ -1234,7 +1587,7 @@ module.exports = exports['default'];
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
-    value: true
+  value: true
 });
 
 var _locale = require('./locale');
@@ -1248,95 +1601,95 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
  *
  */
 var Err = {
-    SUCCESS: {
-        err: 0,
-        msg: 'Success'
-    },
+  SUCCESS: {
+    err: 0,
+    msg: 'Success'
+  },
 
-    FAIL: {
-        err: 1,
-        msg: 'Fail'
-    },
+  FAIL: {
+    err: 1,
+    msg: 'Fail'
+  },
 
-    FA_SYS: {
-        err: 2,
-        msg: 'System Error'
-    },
+  FA_SYS: {
+    err: 2,
+    msg: 'System Error'
+  },
 
-    FA_NETWORK: {
-        err: 3,
-        msg: 'Network Error'
-    },
+  FA_NETWORK: {
+    err: 3,
+    msg: 'Network Error'
+  },
 
-    FA_PARAMS: {
-        err: 4,
-        msg: 'Parameter Error'
-    },
+  FA_PARAMS: {
+    err: 4,
+    msg: 'Parameter Error'
+  },
 
-    FA_BUSY: {
-        err: 5,
-        msg: 'Busy'
-    },
+  FA_BUSY: {
+    err: 5,
+    msg: 'Busy'
+  },
 
-    FA_TIMEOUT: {
-        err: 6,
-        msg: 'Time Out'
-    },
+  FA_TIMEOUT: {
+    err: 6,
+    msg: 'Time Out'
+  },
 
-    FA_ABORT: {
-        err: 7,
-        msg: 'Abort'
-    },
+  FA_ABORT: {
+    err: 7,
+    msg: 'Abort'
+  },
 
-    FA_NOTREADY: {
-        err: 8,
-        msg: 'Not Ready'
-    },
+  FA_NOTREADY: {
+    err: 8,
+    msg: 'Not Ready'
+  },
 
-    FA_NOTEXISTS: {
-        err: 9,
-        msg: 'Not Exists'
-    },
+  FA_NOTEXISTS: {
+    err: 9,
+    msg: 'Not Exists'
+  },
 
-    FA_EXISTS: {
-        err: 8,
-        msg: 'Already Exists'
-    },
+  FA_EXISTS: {
+    err: 8,
+    msg: 'Already Exists'
+  },
 
-    OK: {
-        err: 200,
-        msg: 'OK'
-    },
+  OK: {
+    err: 200,
+    msg: 'OK'
+  },
 
-    FA_BADREQUEST: {
-        err: 400,
-        msg: 'Bad Request'
-    },
+  FA_BADREQUEST: {
+    err: 400,
+    msg: 'Bad Request'
+  },
 
-    FA_NOAUTH: {
-        err: 401,
-        msg: 'Unauthorized'
-    },
+  FA_NOAUTH: {
+    err: 401,
+    msg: 'Unauthorized'
+  },
 
-    FA_NOPERMISSION: {
-        err: 403,
-        msg: 'Forbidden'
-    },
+  FA_NOPERMISSION: {
+    err: 403,
+    msg: 'Forbidden'
+  },
 
-    FA_NOTFOUND: {
-        err: 404,
-        msg: 'Not Found'
-    },
+  FA_NOTFOUND: {
+    err: 404,
+    msg: 'Not Found'
+  },
 
-    FA_INTERNALERROR: {
-        err: 500,
-        msg: 'Internal Server Error'
-    },
+  FA_INTERNALERROR: {
+    err: 500,
+    msg: 'Internal Server Error'
+  },
 
-    FA_UNAVAILABLE: {
-        err: 503,
-        msg: 'Service Unavailable'
-    }
+  FA_UNAVAILABLE: {
+    err: 503,
+    msg: 'Service Unavailable'
+  }
 }; /**
     * err module.
     * @module err
@@ -1357,33 +1710,12 @@ Err.t = _locale2.default;
  * @return {String} final message
  */
 var errMsg = function errMsg(msg, opts) {
-    if (opts) {
-        var _iteratorNormalCompletion = true;
-        var _didIteratorError = false;
-        var _iteratorError = undefined;
-
-        try {
-            for (var _iterator = Object.keys(opts)[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-                var key = _step.value;
-
-                msg = msg.split('${' + key + '}').join(opts[key]);
-            }
-        } catch (err) {
-            _didIteratorError = true;
-            _iteratorError = err;
-        } finally {
-            try {
-                if (!_iteratorNormalCompletion && _iterator.return) {
-                    _iterator.return();
-                }
-            } finally {
-                if (_didIteratorError) {
-                    throw _iteratorError;
-                }
-            }
-        }
+  if (opts) {
+    for (var key in opts) {
+      msg = msg.split('${' + key + '}').join(opts[key]);
     }
-    return msg;
+  }
+  return msg;
 };
 
 /**
@@ -1393,15 +1725,15 @@ var errMsg = function errMsg(msg, opts) {
  * @return {Error}
  */
 var err = function err(E, opts) {
-    if (typeof E === 'string') {
-        E = {
-            msg: E
-        };
-    }
-    var msg = errMsg(E.msg, opts);
-    var e = new Error(msg);
-    E.err && (e.code = E.err);
-    return e;
+  if (typeof E === 'string') {
+    E = {
+      msg: E
+    };
+  }
+  var msg = errMsg(E.msg, opts);
+  var e = new Error(msg);
+  E.err && (e.code = E.err);
+  return e;
 };
 
 /**
@@ -1411,13 +1743,13 @@ var err = function err(E, opts) {
  * @return {boolean}
  */
 var enableErr = function enableErr(obj) {
-    var name = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'Err';
+  var name = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'Err';
 
-    if (obj[name]) return false;
-    obj[name] = Err;
-    obj.err = err;
-    obj.errMsg = errMsg;
-    return true;
+  if (obj[name]) return false;
+  obj[name] = Err;
+  obj.err = err;
+  obj.errMsg = errMsg;
+  return true;
 };
 
 /**
@@ -1426,31 +1758,31 @@ var enableErr = function enableErr(obj) {
  * @param {String} [name] name to bind
  */
 var disableErr = function disableErr(obj) {
-    var name = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'Err';
+  var name = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'Err';
 
-    if (!obj[name]) return;
-    delete obj[name];
-    delete obj.err;
-    delete obj.errMsg;
+  if (!obj[name]) return;
+  delete obj[name];
+  delete obj.err;
+  delete obj.errMsg;
 };
 
 var $ = {
-    Err: Err,
-    errMsg: errMsg,
-    err: err,
-    enableErr: enableErr,
-    disableErr: disableErr
+  Err: Err,
+  errMsg: errMsg,
+  err: err,
+  enableErr: enableErr,
+  disableErr: disableErr
 };
 
 if (typeof global !== 'undefined' && global) {
-    global.jm || (global.jm = {});
-    var jm = global.jm;
-    if (!jm.enableErr) {
-        enableErr(jm);
-        for (var key in $) {
-            jm[key] = $[key];
-        }
+  global.jm || (global.jm = {});
+  var jm = global.jm;
+  if (!jm.enableErr) {
+    enableErr(jm);
+    for (var key in $) {
+      jm[key] = $[key];
     }
+  }
 }
 
 exports.default = $;
@@ -1460,12 +1792,12 @@ module.exports = exports['default'];
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
-    value: true
+  value: true
 });
 
 exports.default = function (msg, lng) {
-    if (!lng || !lngs[lng]) return null;
-    return lngs[lng][msg];
+  if (!lng || !lngs[lng]) return null;
+  return lngs[lng][msg];
 };
 
 var _zh_CN = require('./zh_CN');
@@ -1475,42 +1807,41 @@ var _zh_CN2 = _interopRequireDefault(_zh_CN);
 function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
 
 var lngs = {
-    zh_CN: _zh_CN2.default
-};
+  zh_CN: _zh_CN2.default
 
-/**
- * translate
- * @param {string} msg - msg to be translate
- * @param {string} lng - language
- * @return {String | null}
- */
-;
+  /**
+   * translate
+   * @param {string} msg - msg to be translate
+   * @param {string} lng - language
+   * @return {String | null}
+   */
+};;
 module.exports = exports['default'];
 },{"./zh_CN":14}],14:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
-    value: true
+  value: true
 });
 exports.default = {
-    'Success': '成功',
-    'Fail': '失败',
-    'System Error': '系统错误',
-    'Network Error': '网络错误',
-    'Parameter Error': '参数错误',
-    'Busy': '忙',
-    'Time Out': '超时',
-    'Abort': '中止',
-    'Not Ready': '未准备好',
-    'Not Exists': '不存在',
-    'Already Exists': '已存在',
-    'OK': 'OK',
-    'Bad Request': '错误请求',
-    'Unauthorized': '未验证',
-    'Forbidden': '无权限',
-    'Not Found': '未找到',
-    'Internal Server Error': '服务器内部错误',
-    'Service Unavailable': '无效服务'
+  'Success': '成功',
+  'Fail': '失败',
+  'System Error': '系统错误',
+  'Network Error': '网络错误',
+  'Parameter Error': '参数错误',
+  'Busy': '忙',
+  'Time Out': '超时',
+  'Abort': '中止',
+  'Not Ready': '未准备好',
+  'Not Exists': '不存在',
+  'Already Exists': '已存在',
+  'OK': 'OK',
+  'Bad Request': '错误请求',
+  'Unauthorized': '未验证',
+  'Forbidden': '无权限',
+  'Not Found': '未找到',
+  'Internal Server Error': '服务器内部错误',
+  'Service Unavailable': '无效服务'
 };
 module.exports = exports['default'];
 },{}],15:[function(require,module,exports){
@@ -1518,7 +1849,7 @@ module.exports = exports['default'];
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
-    value: true
+  value: true
 });
 
 var _createClass = function () { function defineProperties(target, props) { for (var i = 0; i < props.length; i++) { var descriptor = props[i]; descriptor.enumerable = descriptor.enumerable || false; descriptor.configurable = true; if ("value" in descriptor) descriptor.writable = true; Object.defineProperty(target, descriptor.key, descriptor); } } return function (Constructor, protoProps, staticProps) { if (protoProps) defineProperties(Constructor.prototype, protoProps); if (staticProps) defineProperties(Constructor, staticProps); return Constructor; }; }();
@@ -1553,17 +1884,16 @@ function _classCallCheck(instance, Constructor) { if (!(instance instanceof Cons
  * ```
  */
 var EventEmitter = function () {
-
-    /**
+  /**
      * Create an eventEmitter.
      */
-    function EventEmitter() {
-        _classCallCheck(this, EventEmitter);
+  function EventEmitter() {
+    _classCallCheck(this, EventEmitter);
 
-        this._events = {};
-    }
+    this._events = {};
+  }
 
-    /**
+  /**
      * Adds the listener function to the end of the listeners array for the event named eventName.
      * No checks are made to see if the listener has already been added.
      * Multiple calls passing the same combination of eventName and listener will result in the listener being added, and called, multiple times.
@@ -1575,254 +1905,211 @@ var EventEmitter = function () {
      */
 
 
-    _createClass(EventEmitter, [{
-        key: 'on',
-        value: function on(eventName, fn, prepend) {
-            this._events[eventName] || (this._events[eventName] = []);
-            if (prepend) {
-                this._events[eventName].unshift(fn);
-            } else {
-                this._events[eventName].push(fn);
+  _createClass(EventEmitter, [{
+    key: 'on',
+    value: function on(eventName, fn, prepend) {
+      this._events[eventName] || (this._events[eventName] = []);
+      if (prepend) {
+        this._events[eventName].unshift(fn);
+      } else {
+        this._events[eventName].push(fn);
+      }
+      return this;
+    }
+
+    /**
+       * Adds a one time listener function for the event named eventName.
+       * The next time eventName is triggered, this listener is removed and then invoked.
+       *
+       * @param {*} eventName - event name
+       * @param {Function} fn - listener function
+       * @param {boolean} [prepend] - Adds to the beginning of the listeners array if true
+       * @return {EventEmitter} - for chaining
+       */
+
+  }, {
+    key: 'once',
+    value: function once(eventName, fn, prepend) {
+      var _this = this;
+
+      var on = function on(arg1, arg2, arg3, arg4, arg5) {
+        _this.off(eventName, on);
+        fn(arg1, arg2, arg3, arg4, arg5);
+      };
+      return this.on(eventName, on, prepend);
+    }
+
+    /**
+       * Removes a listener for the event named eventName.
+       * Removes all listeners from the listener array for event named eventName if fn is null
+       * Removes all listeners from the listener array if eventName is null
+       *
+       * @param {*} [eventName] - event name
+       * @param {Function} [fn] - listener function
+       * @return {EventEmitter} - for chaining
+       */
+
+  }, {
+    key: 'off',
+    value: function off(eventName, fn) {
+      if (!fn) {
+        if (eventName === undefined) {
+          this._events = {};
+        } else if (this._events && this._events[eventName]) {
+          delete this._events[eventName];
+        }
+      } else if (this._events && this._events[eventName]) {
+        var list = this._events[eventName];
+        for (var i = 0; i < list.length; i++) {
+          if (fn === list[i]) {
+            list.splice(i, 1);
+            if (!list.length) {
+              delete this._events[eventName];
             }
-            return this;
+            break;
+          }
         }
+      }
+      return this;
+    }
 
-        /**
-         * Adds a one time listener function for the event named eventName.
-         * The next time eventName is triggered, this listener is removed and then invoked.
-         *
-         * @param {*} eventName - event name
-         * @param {Function} fn - listener function
-         * @param {boolean} [prepend] - Adds to the beginning of the listeners array if true
-         * @return {EventEmitter} - for chaining
-         */
+    /**
+       * Synchronously calls each of the listeners registered for the event named eventName,
+       * in the order they were registered, passing the supplied arguments to each.
+       *
+       * to break the calls, just return false on listener function.
+       * ```javascript
+       * // es6
+       * let eventEmitter = new EventEmitter();
+       * eventEmitter.on('test', (info) => {
+       *      // this will be called
+       *      console.log(info);
+       * });
+       * eventEmitter.on('test', (info) => {
+       *      // this will be called
+       *      return false;  // this break the calls
+       * });
+       * eventEmitter.on('test', (info) => {
+       *      // this will not be called.
+       *      console.log(info);
+       * });
+       * eventEmitter.emit('test', 'hello eventEmitter');
+       * ```
+       * tip: use arg1...arg5 instead of arguments for performance consider.
+       *
+       * @param {*} eventName - event name
+       * @param {*} arg1
+       * @param {*} arg2
+       * @param {*} arg3
+       * @param {*} arg4
+       * @param {*} arg5
+       * @return {EventEmitter} - for chaining
+       */
 
-    }, {
-        key: 'once',
-        value: function once(eventName, fn, prepend) {
-            var _this = this;
+  }, {
+    key: 'emit',
+    value: function emit(eventName, arg1, arg2, arg3, arg4, arg5) {
+      // using a copy to avoid error when listener array changed
+      var listeners = this.listeners(eventName);
+      for (var i = 0; i < listeners.length; i++) {
+        var fn = listeners[i];
+        if (fn(arg1, arg2, arg3, arg4, arg5) === false) break;
+      }
+      return this;
+    }
 
-            var on = function on(arg1, arg2, arg3, arg4, arg5) {
-                _this.off(eventName, on);
-                fn(arg1, arg2, arg3, arg4, arg5);
-            };
-            return this.on(eventName, on, prepend);
-        }
+    /**
+       * Returns an array listing the events for which the emitter has registered listeners.
+       * The values in the array will be strings or Symbols.
+       * @return {Array}
+       */
 
-        /**
-         * Removes a listener for the event named eventName.
-         * Removes all listeners from the listener array for event named eventName if fn is null
-         * Removes all listeners from the listener array if eventName is null
-         *
-         * @param {*} [eventName] - event name
-         * @param {Function} [fn] - listener function
-         * @return {EventEmitter} - for chaining
-         */
+  }, {
+    key: 'eventNames',
+    value: function eventNames() {
+      return Object.keys(this._events);
+    }
 
-    }, {
-        key: 'off',
-        value: function off(eventName, fn) {
-            if (!fn) {
-                if (eventName === undefined) {
-                    this._events = {};
-                } else if (this._events && this._events[eventName]) {
-                    delete this._events[eventName];
-                }
-            } else if (this._events && this._events[eventName]) {
-                var list = this._events[eventName];
-                for (var i = 0; i < list.length; i++) {
-                    if (fn === list[i]) {
-                        list.splice(i, 1);
-                        if (!list.length) {
-                            delete this._events[eventName];
-                        }
-                        break;
-                    }
-                }
-            }
-            return this;
-        }
+    /**
+       * Returns a copy of the array of listeners for the event named eventName.
+       * @param {*} eventName - event name
+       * @return {Array} - listener array
+       */
 
-        /**
-         * Synchronously calls each of the listeners registered for the event named eventName,
-         * in the order they were registered, passing the supplied arguments to each.
-         *
-         * to break the calls, just return false on listener function.
-         * ```javascript
-         * // es6
-         * let eventEmitter = new EventEmitter();
-         * eventEmitter.on('test', (info) => {
-         *      // this will be called
-         *      console.log(info);
-         * });
-         * eventEmitter.on('test', (info) => {
-         *      // this will be called
-         *      return false;  // this break the calls
-         * });
-         * eventEmitter.on('test', (info) => {
-         *      // this will not be called.
-         *      console.log(info);
-         * });
-         * eventEmitter.emit('test', 'hello eventEmitter');
-         * ```
-         * tip: use arg1...arg5 instead of arguments for performance consider.
-         *
-         * @param {*} eventName - event name
-         * @param {*} arg1
-         * @param {*} arg2
-         * @param {*} arg3
-         * @param {*} arg4
-         * @param {*} arg5
-         * @return {EventEmitter} - for chaining
-         */
+  }, {
+    key: 'listeners',
+    value: function listeners(eventName) {
+      var v = this._events[eventName];
+      if (!v) return [];
+      var listeners = new Array(v.length);
+      for (var i = 0; i < v.length; i++) {
+        listeners[i] = v[i];
+      }
+      return listeners;
+    }
+  }]);
 
-    }, {
-        key: 'emit',
-        value: function emit(eventName, arg1, arg2, arg3, arg4, arg5) {
-            // using a copy to avoid error when listener array changed
-            var listeners = this.listeners(eventName);
-            for (var i = 0; i < listeners.length; i++) {
-                var fn = listeners[i];
-                if (fn(arg1, arg2, arg3, arg4, arg5) === false) break;
-            }
-            return this;
-        }
-
-        /**
-         * Returns an array listing the events for which the emitter has registered listeners.
-         * The values in the array will be strings or Symbols.
-         * @return {Array}
-         */
-
-    }, {
-        key: 'eventNames',
-        value: function eventNames() {
-            return Object.keys(this._events);
-        }
-
-        /**
-         * Returns a copy of the array of listeners for the event named eventName.
-         * @param {*} eventName - event name
-         * @return {Array} - listener array
-         */
-
-    }, {
-        key: 'listeners',
-        value: function listeners(eventName) {
-            var v = this._events[eventName];
-            if (!v) return [];
-            var listeners = new Array(v.length);
-            for (var i = 0; i < v.length; i++) {
-                listeners[i] = v[i];
-            }
-            return listeners;
-        }
-    }]);
-
-    return EventEmitter;
+  return EventEmitter;
 }();
 
 var prototype = EventEmitter.prototype;
 var EM = {
-    _events: {},
-    on: prototype.on,
-    once: prototype.once,
-    off: prototype.off,
-    emit: prototype.emit,
-    eventNames: prototype.eventNames,
-    listeners: prototype.listeners
+  _events: {},
+  on: prototype.on,
+  once: prototype.once,
+  off: prototype.off,
+  emit: prototype.emit,
+  eventNames: prototype.eventNames,
+  listeners: prototype.listeners
 };
 
 var enableEvent = function enableEvent(obj) {
-    if (obj.emit !== undefined) return false;
-    var _iteratorNormalCompletion = true;
-    var _didIteratorError = false;
-    var _iteratorError = undefined;
-
-    try {
-        for (var _iterator = Object.keys(EM)[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
-            var key = _step.value;
-
-            obj[key] = EM[key];
-        }
-    } catch (err) {
-        _didIteratorError = true;
-        _iteratorError = err;
-    } finally {
-        try {
-            if (!_iteratorNormalCompletion && _iterator.return) {
-                _iterator.return();
-            }
-        } finally {
-            if (_didIteratorError) {
-                throw _iteratorError;
-            }
-        }
-    }
-
-    obj._events = {};
-    return true;
+  if (obj.emit !== undefined) return false;
+  for (var key in EM) {
+    obj[key] = EM[key];
+  }
+  obj._events = {};
+  return true;
 };
 
 var disableEvent = function disableEvent(obj) {
-    if (obj.emit === undefined) return;
-    var _iteratorNormalCompletion2 = true;
-    var _didIteratorError2 = false;
-    var _iteratorError2 = undefined;
-
-    try {
-        for (var _iterator2 = Object.keys(EM)[Symbol.iterator](), _step2; !(_iteratorNormalCompletion2 = (_step2 = _iterator2.next()).done); _iteratorNormalCompletion2 = true) {
-            var key = _step2.value;
-
-            delete obj[key];
-        }
-    } catch (err) {
-        _didIteratorError2 = true;
-        _iteratorError2 = err;
-    } finally {
-        try {
-            if (!_iteratorNormalCompletion2 && _iterator2.return) {
-                _iterator2.return();
-            }
-        } finally {
-            if (_didIteratorError2) {
-                throw _iteratorError2;
-            }
-        }
-    }
+  if (obj.emit === undefined) return;
+  for (var key in EM) {
+    delete obj[key];
+  }
 };
 
 var moduleEvent = function moduleEvent() {
-    var name = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 'event';
+  var name = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 'event';
 
-    var obj = this;
-    obj.enableEvent = enableEvent;
-    obj.disableEvent = disableEvent;
+  var obj = this;
+  obj.enableEvent = enableEvent;
+  obj.disableEvent = disableEvent;
 
-    return {
-        name: name,
-        unuse: function unuse() {
-            delete obj.enableEvent;
-            delete obj.disableEvent;
-        }
-    };
+  return {
+    name: name,
+    unuse: function unuse() {
+      delete obj.enableEvent;
+      delete obj.disableEvent;
+    }
+  };
 };
 
 var $ = {
-    EventEmitter: EventEmitter,
-    enableEvent: enableEvent,
-    disableEvent: disableEvent,
-    moduleEvent: moduleEvent
+  EventEmitter: EventEmitter,
+  enableEvent: enableEvent,
+  disableEvent: disableEvent,
+  moduleEvent: moduleEvent
 };
 
 if (typeof global !== 'undefined' && global) {
-    global.jm || (global.jm = {});
-    var jm = global.jm;
-    if (!jm.EventEmitter) {
-        for (var key in $) {
-            jm[key] = $[key];
-        }
+  global.jm || (global.jm = {});
+  var jm = global.jm;
+  if (!jm.EventEmitter) {
+    for (var key in $) {
+      jm[key] = $[key];
     }
+  }
 }
 
 exports.default = $;
@@ -2609,6 +2896,83 @@ exports.default = $;
 module.exports = exports['default'];
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
 },{}],19:[function(require,module,exports){
+module.exports=require(16)
+},{}],20:[function(require,module,exports){
+(function (global){
+'use strict';
+
+Object.defineProperty(exports, "__esModule", {
+    value: true
+});
+var utils = {
+    // 高效slice
+    slice: function slice(a, start, end) {
+        start = start || 0;
+        end = end || a.length;
+        if (start < 0) start += a.length;
+        if (end < 0) end += a.length;
+        var r = new Array(end - start);
+        for (var i = start; i < end; i++) {
+            r[i - start] = a[i];
+        }
+        return r;
+    },
+
+    formatJSON: function formatJSON(obj) {
+        return JSON.stringify(obj, null, 2);
+    },
+
+    getUriProtocol: function getUriProtocol(uri) {
+        if (!uri) return null;
+        return uri.substring(0, uri.indexOf(':'));
+    },
+
+    getUriPath: function getUriPath(uri) {
+        var idx = uri.indexOf('//');
+        if (idx == -1) return '';
+        idx = uri.indexOf('/', idx + 2);
+        if (idx == -1) return '';
+        uri = uri.substr(idx);
+        idx = uri.indexOf('#');
+        if (idx == -1) idx = uri.indexOf('?');
+        if (idx != -1) uri = uri.substr(0, idx);
+        return uri;
+    }
+};
+
+var moduleUtils = function moduleUtils() {
+    var name = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 'utils';
+
+    var app = this;
+    app[name] = utils;
+
+    return {
+        name: name,
+        unuse: function unuse() {
+            delete app[name];
+        }
+    };
+};
+
+var $ = {
+    utils: utils,
+    moduleUtils: moduleUtils
+};
+
+if (typeof global !== 'undefined' && global) {
+    global.jm || (global.jm = {});
+    var jm = global.jm;
+    if (!jm.utils) {
+        for (var key in $) {
+            jm[key] = $[key];
+        }
+    }
+}
+
+exports.default = $;
+module.exports = exports['default'];
+}).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
+},{}],21:[function(require,module,exports){
 (function (global){
 /**
  * @license
