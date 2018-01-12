@@ -104,22 +104,6 @@ var C = function (_ECS$C) {
       this.ticks++;
     }.bind(e));
 
-    e.copyPlayers = function () {
-      var bJSON = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : false;
-
-      var v = this.players;
-      var ret = [];
-      for (var key in v) {
-        var o = v[key];
-        if (bJSON) {
-          ret.push(o.toJSON());
-        } else {
-          ret.push(o);
-        }
-      }
-      return ret;
-    };
-
     /**
      * remove entities
      * @param v
@@ -212,7 +196,7 @@ var C = function (_ECS$C) {
         runTime: this.runTime, // 运行时间
         totalPlayers: this.totalPlayers, // 当前房间玩家数
         maxPlayers: this.maxPlayers, // 房间最大人数上限
-        players: this.copyPlayers(true) // 玩家列表
+        players: this.players // 玩家列表
       };
       this.emit('toJSON', o);
       return o;

@@ -75,44 +75,6 @@ class C extends ECS.C {
         this.ticks++
       }.bind(e))
 
-    e.copyPlayers = function (bJSON = false) {
-      let v = this.players
-      let ret = []
-      for (let key in v) {
-        let o = v[key]
-        if (bJSON) {
-          ret.push(o.toJSON())
-        } else {
-          ret.push(o)
-        }
-      }
-      return ret
-    }
-
-    /**
-     * remove entities
-     * @param v
-     */
-    e.removeEntities = function (v) {
-      for (let i in v) {
-        v[i].removeFromParent()
-      }
-    }
-
-    /**
-     * remove entities by type
-     * @param type
-     */
-    e.removeEntitiesByType = function (type) {
-      let v = this.entities
-      for (let i in v) {
-        let o = v[i]
-        if (o.type === type) {
-          o.removeFromParent()
-        }
-      }
-    }
-
     e.findPlayer = function (id) {
       return _.find(this.players, {id})
     }
@@ -181,7 +143,7 @@ class C extends ECS.C {
         runTime: this.runTime, // 运行时间
         totalPlayers: this.totalPlayers, // 当前房间玩家数
         maxPlayers: this.maxPlayers, // 房间最大人数上限
-        players: this.copyPlayers(true) // 玩家列表
+        players: this.players // 玩家列表
       }
       this.emit('toJSON', o)
       return o
