@@ -23,7 +23,7 @@
   },
   "homepage": "https://github.com/jm-root/jm-game-ecs",
   "dependencies": {
-    "jm-ecs": "^1.0.3"
+    "jm-ecs": "^1.0.4"
   },
   "devDependencies": {
     "babel-cli": "^6.24.1",

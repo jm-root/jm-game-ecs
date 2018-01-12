@@ -104,30 +104,6 @@ var C = function (_ECS$C) {
       this.ticks++;
     }.bind(e));
 
-    /**
-     * remove entities
-     * @param v
-     */
-    e.removeEntities = function (v) {
-      for (var i in v) {
-        v[i].removeFromParent();
-      }
-    };
-
-    /**
-     * remove entities by type
-     * @param type
-     */
-    e.removeEntitiesByType = function (type) {
-      var v = this.entities;
-      for (var i in v) {
-        var o = v[i];
-        if (o.type === type) {
-          o.removeFromParent();
-        }
-      }
-    };
-
     e.findPlayer = function (id) {
       return _lodash2.default.find(this.players, { id: id });
     };
@@ -832,7 +808,9 @@ var ECS = function (_Obj) {
   }, {
     key: 'em',
     value: function em(opts) {
-      return new _em2.default(this, opts);
+      var o = new _em2.default(this, opts);
+      this.emit('em', o);
+      return o;
     }
   }, {
     key: 'toJSON',
@@ -849,7 +827,9 @@ var ECS = function (_Obj) {
   return ECS;
 }(_obj2.default);
 
+ECS.EM = _em2.default;
 ECS.C = _component2.default;
+ECS.Obj = _obj2.default;
 
 exports.default = ECS;
 module.exports = exports['default'];
@@ -934,6 +914,7 @@ var EM = function (_Obj) {
       }
 
       this._entityTypes[type] = opts;
+      return this;
     }
   }, {
     key: 'addEntityTypes',
@@ -941,6 +922,7 @@ var EM = function (_Obj) {
       for (var type in opts) {
         this.addEntityType(type, opts[type]);
       }
+      return this;
     }
   }, {
     key: 'entityType',
@@ -1002,7 +984,7 @@ var EM = function (_Obj) {
         if (!info) continue;
         var o = null;
         var className = info.className || 'jm.Entity';
-        if (className == 'jm.Entity') {
+        if (className === 'jm.Entity') {
           var type = info.type;
           o = this.createEntity(type, info, e);
         }
@@ -1055,6 +1037,7 @@ var EM = function (_Obj) {
       pool.forEach(function (e) {
         e.destroy();
       });
+      return this;
     }
   }, {
     key: 'clearPools',
@@ -1062,6 +1045,7 @@ var EM = function (_Obj) {
       for (var type in this._pools) {
         this.clearPool(type);
       }
+      return this;
     }
   }, {
     key: 'removeEntity',
@@ -1102,6 +1086,22 @@ var EM = function (_Obj) {
         var _e = v[i];
         this.removeEntity(_e.entityId);
       }
+      return this;
+    }
+  }, {
+    key: 'removeEntities',
+    value: function removeEntities(v) {
+      for (var i in v) {
+        this.removeEntity(v[i]);
+      }
+      return this;
+    }
+  }, {
+    key: 'removeEntitiesByType',
+    value: function removeEntitiesByType(type) {
+      var v = _lodash2.default.filter(this._entities, { type: type });
+      if (v) this.removeEntities(v);
+      return this;
     }
 
     //    getEntities('render')
@@ -1116,10 +1116,8 @@ var EM = function (_Obj) {
       var v = {};
       // select entities by tags
       if (typeof selector === 'string') {
-        var and = false,
-            // flags for multiple
-        or = false;
-
+        var and = false; // flags for multiple
+        var or = false;
         var rlist = /\s*,\s*/;
         var rspace = /\s+/;
         var del = void 0;
@@ -1252,8 +1250,7 @@ var Err = _consts2.default.Err;
 var guid = 1;
 
 function isEmptyObject(e) {
-  var t = void 0;
-  for (var _t in e) {
+  for (var t in e) {
     return false;
   }
   return true;
@@ -1423,9 +1420,6 @@ var E = function (_Obj) {
       if (!origin) {
         return;
       }
-
-      var obj = target;
-
       for (var key in target) {
         var t = target[key];
         var o = origin[key];
@@ -1483,7 +1477,6 @@ var E = function (_Obj) {
         if (!opts.children) opts.children = [];
         opts.children.push(e.toJSON());
       }
-
       return opts;
     }
   }, {
