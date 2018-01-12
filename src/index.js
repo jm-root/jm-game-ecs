@@ -1,43 +1,158 @@
 /**
+ * 每个游戏管理多个 area
+ *
  * 为了简单，设计上 em 与 area 一对一， 即每个 em 只有一个 area，保证了每个 em 中的实体都是 area 或者 属于 area 的实体
+ *
+ * area 和 player 都有唯一 id, 可以根据 id 搜索到
  *
  */
 import Area from './area'
 import Player from './player'
 import ECS from 'jm-ecs'
+import log from 'jm-logger'
+import { utils } from 'jm-utils'
+import _ from 'lodash'
 
-let $ = function (opts) {
-  let ecs = new ECS()
-    .uses([{class: Area}, {class: Player}])
+let logger = log.getLogger('jm-game-ecs')
 
-  let areas = {}
-  ecs.areas = areas
+const State = {
+  closed: 0, // 关闭
+  open: 1,   // 开放
+  paused: 2  // 暂停
+}
 
-  ecs.start = function (opts = {}) {
-    let interval = opts.interval || 100
-    this.stop()
-    this.updateTime = Date.now()
-    this.timer = setInterval(function () {
-      let t = Date.now()
-      let nDelta = t - this.updateTime
-      let fDelta = nDelta / 1000
-      this.updateTime = t
-      for (let id in areas) {
-        let e = areas[id]
-        e.em.emit('update', fDelta, nDelta)
-      }
-    }.bind(this), interval)
+/**
+ * represent a game
+ */
+class Game extends ECS {
+  /**
+   * create a game
+   *
+   * @param {Object} opts
+   * @example
+   * opts: {
+   *  disableAutoOpen: (可选) 是否禁止自动开放 game , 默认不禁止
+   *  interval: (可选) 内部 update 周期，单位 ms, 默认 0 表示不启用内部 update )
+   * }
+   */
+  constructor (opts = {}) {
+    super()
+    this.State = State
+    this.state = State.closed
+    this.areas = []
+    this.uses([{class: Area}, {class: Player}])
+    if (!opts.disableAutoOpen) {
+      this.open(opts)
+    }
+    Object.defineProperty(this, 'players', {
+      get: function (bJSON = false) {
+        let areas = this.areas
+        let players = []
+        for (let i in areas) {
+          let v = areas[i].players
+          for (let j in v) {
+            players.push(v[j])
+          }
+        }
+        return players
+      }.bind(this)
+    })
   }
 
-  ecs.stop = function () {
-    if (!this.timer) return
-    clearInterval(this.timer)
-    this.timer = null
+  /**
+   * update the game
+   * @param fDelta 单位秒
+   * @param nDelta 单位毫秒
+   */
+  update (fDelta = 0, nDelta) {
+    if (this.state !== State.open) return
+    nDelta || (nDelta = parseInt(fDelta * 1000))
+    let areas = this.areas
+    for (let i in areas) {
+      let e = areas[i]
+      e.em.emit('update', fDelta, nDelta)
+    }
   }
 
-  ecs.start()
+  /**
+   * open the game
+   * @param opts
+   * @returns {boolean}
+   */
+  open (opts = {}) {
+    if (this.state !== State.closed) {
+      logger.warn('game not in closed, can not be open')
+      return false
+    }
+    this.state = State.open
+    this.emit('open')
+    logger.info('game open')
+    let interval = opts.interval
+    if (interval) {
+      this._updateTime = Date.now()
+      this._timer = setInterval(function () {
+        let t = Date.now()
+        let nDelta = t - this._updateTime
+        let fDelta = nDelta / 1000
+        this._updateTime = t
+        this.update(fDelta, nDelta)
+      }.bind(this), interval)
+    }
+    return true
+  }
 
-  ecs.createArea = function (opts) {
+  /**
+   * close the game
+   * @returns {boolean}
+   */
+  close () {
+    if (this.state !== State.open && this.state !== State.paused) {
+      logger.warn('game not in open or paused, can not be close')
+      return false
+    }
+    this.state = State.closed
+    if (this._timer) {
+      clearInterval(this._timer)
+      this._timer = null
+    }
+    this.emit('close')
+    logger.info('game closed')
+    return true
+  }
+
+  /**
+   * pause the game, stop update
+   * @returns {boolean}
+   */
+  pause () {
+    if (this.state !== State.open) {
+      logger.warn('game not in open, can not be paused')
+      return false
+    }
+    this.state = State.paused
+    this.emit('pause')
+    logger.info('game paused')
+    return true
+  }
+
+  resume () {
+    if (this.state !== State.paused) {
+      logger.warn('game not in paused, can not be resume')
+      return false
+    }
+    this.state = State.open
+    this.emit('resume')
+    logger.info('game resumed')
+    return true
+  }
+
+  /**
+   * create an area
+   * @param opts
+   * @returns {*}
+   */
+  createArea (opts) {
+    let areas = this.areas
     let em = this.em()
     if (!em.entityType('area')) {
       em.addEntityType('area', {
@@ -54,52 +169,51 @@ let $ = function (opts) {
       })
     }
     let e = em.createEntity('area', opts)
-    areas[e.entityId] = e
+    areas.push(e)
+    em.area = e
+    this.emit('addArea', e)
+    logger.info('area added: %s', utils.formatJSON(e.toJSON()))
+    e.on('remove', function () {
+      this.emit('removeArea', e)
+      _.pull(this.areas, e)
+      logger.info('area removed: %s', utils.formatJSON(e.toJSON()))
+    }.bind(this))
     return e
   }
 
-  ecs.findArea = function (entityId) {
-    return areas[entityId]
+  /**
+   * find area by area.id
+   * @param id
+   * @returns {*}
+   */
+  findArea (id) {
+    return _.find(this.areas, {id})
   }
 
-  ecs.findPlayer = function (entityId) {
-    for (let id in areas) {
-      let e = areas[id]
-      let player = e.players[entityId]
+  /**
+   * find player by player.id
+   * @param id
+   * @returns {*}
+   */
+  findPlayer (id) {
+    let areas = this.areas
+    for (let i in areas) {
+      let player = areas[i].findPlayer(id)
       if (player) return player
     }
     return null
   }
-
-  ecs.findPlayerById = function (id) {
-    for (let i in areas) {
-      let players = areas[i].players
-      for (let j in players) {
-        let player = players[j]
-        if (player.id === id) return player
-      }
-    }
-    return null
-  }
-
-  ecs.getPlayers = function () {
-    let players = {}
-    for (let i in areas) {
-      let v = areas[i].players
-      for (let j in v) {
-        players[j] = v[j]
-      }
-    }
-    return players
-  }
-
-  return ecs
 }
 
 if (typeof global !== 'undefined' && global) {
-  !global.jm && (global.jm = {})
-  !global.jm.game && (global.jm.game = {})
-  global.jm.game.ecs = $
+  global.jm || (global.jm = {})
+  let jm = global.jm
+  if (!jm.game) {
+    jm.Game = Game
+    jm.game = (opts) => {
+      return new Game(opts)
+    }
+  }
 }
 
-export default $
+export default Game

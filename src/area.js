@@ -1,6 +1,6 @@
 import ECS from 'jm-ecs'
 import log from 'jm-logger'
-import {utils} from 'jm-utils'
+import { utils } from 'jm-utils'
 import _ from 'lodash'
 
 let logger = log.getLogger('area')
@@ -20,28 +20,24 @@ class C extends ECS.C {
     e.maxPlayers = opts.maxPlayers || 5 // 最大玩家数上限
     e.runTime = 0 // 运行时间
     e.ticks = 0 // 更新次数
-    e.players = {} // 所有玩家
+    e.players = [] // 所有玩家
     e.state = State.closed
 
     Object.defineProperty(e, 'entities', {
-      get: function (bJSON = false) {
+      get: function () {
         let v = this.em.entities
         let ret = []
         for (let key in v) {
           let o = v[key]
           if (o === this) continue
-          if (bJSON) {
-            ret.push(o.toJSON())
-          } else {
-            ret.push(o)
-          }
+          ret.push(o.toJSON())
         }
         return ret
       }.bind(e)
     })
     Object.defineProperty(e, 'totalPlayers', {
       get: function () {
-        return Object.keys(this.players).length
+        return this.players.length
       }.bind(e)
     })
     Object.defineProperty(e, 'full', {
@@ -55,40 +51,29 @@ class C extends ECS.C {
       }.bind(e)
     })
 
-    e.em.on('addEntity', function (o) {
-      o.area = this
-      if (o.type === 'player') {
-        let players = this.players
-        let entityId = o.entityId
-        if (players[entityId]) {
-          logger.warn('add player twice! player: %s', utils.formatJSON(o.toJSON()))
-          return
+    e.em
+      .on('addEntity', function (o) {
+        o.area = this
+        if (o.type === 'player') {
+          let player = o
+          this.players.push(player)
+          this.emit('addPlayer', player)
+          logger.debug('add player: %s', utils.formatJSON(player.toJSON()))
         }
-        players[entityId] = o
-        this.emit('addPlayer', o)
-        logger.debug('add player: %s', utils.formatJSON(o.toJSON()))
-      }
-    }.bind(e))
-
-    e.em.on('removeEntity', function (o) {
-      if (o.type === 'player') {
-        let players = this.players
-        let entityId = o.entityId
-        if (!players[entityId]) {
-          logger.warn('remove player not exists! player: %s', utils.formatJSON(o.toJSON()))
-          return
+      }.bind(e))
+      .on('removeEntity', function (o) {
+        if (o.type === 'player') {
+          let player = o
+          _.pull(this.players, player)
+          this.emit('removePlayer', player)
+          logger.debug('remove player: %s', utils.formatJSON(player.toJSON()))
         }
-        delete players[entityId]
-        this.emit('removePlayer', o)
-        logger.debug('remove player: %s', utils.formatJSON(o.toJSON()))
-      }
-    }.bind(e))
-
-    e.em.on('update', function (fDelta, nDelta) {
-      if (this.state !== State.open) return
-      this.runTime += nDelta
-      this.ticks++
-    }.bind(e))
+      }.bind(e))
+      .on('update', function (fDelta, nDelta) {
+        if (this.state !== State.open) return
+        this.runTime += nDelta
+        this.ticks++
+      }.bind(e))
 
     e.copyPlayers = function (bJSON = false) {
       let v = this.players
@@ -128,58 +113,54 @@ class C extends ECS.C {
       }
     }
 
-    e.findPlayerById = function (id) {
+    e.findPlayer = function (id) {
       return _.find(this.players, {id})
     }
 
     e.open = function () {
-      if (this.state === State.open) {
-        logger.warn('area is already open')
+      if (this.state !== State.closed) {
+        logger.warn('area not in closed, can not be open')
         return false
       }
       this.runTime = 0
       this.ticks = 0
       this.state = State.open
       this.emit('open')
-      logger.debug('area %j open', this.id)
+      logger.info('area %s open', this.id)
       return true
     }
 
     e.close = function () {
-      if (this.state === State.closed) {
-        logger.warn('area is already closed')
+      if (this.state !== State.open && this.state !== State.paused) {
+        logger.warn('area not in open or paused, can not be closed')
         return false
       }
       this.state = State.closed
       this.clear()
       this.emit('close')
-      logger.debug('area %j closed', this.id)
+      logger.info('area %s closed', this.id)
       return true
     }
 
     e.pause = function () {
-      if (this.state === State.paused) {
-        logger.warn('area is already paused')
-        return false
-      }
-      if (this.state === State.closed) {
-        logger.warn('area is closed, can not be pause')
+      if (this.state !== State.open) {
+        logger.warn('area not in open, can not be paused')
         return false
       }
       this.state = State.paused
       this.emit('pause')
-      logger.debug('area %j paused', this.id)
+      logger.info('area %s paused', this.id)
       return true
     }
 
     e.resume = function () {
       if (this.state !== State.paused) {
-        logger.warn('area is not paused, can not be resume')
+        logger.warn('area not in paused, can not be resume')
         return false
       }
       this.state = State.open
       this.emit('resume')
-      logger.debug('area %j resumed', this.id)
+      logger.info('area %s resumed', this.id)
       return true
     }
 

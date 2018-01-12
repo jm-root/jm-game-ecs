@@ -1,19 +1,18 @@
-import chai from 'chai'
-import _ecs from '../src'
+import Game from '../src'
 import log from 'jm-logger'
-import {utils} from 'jm-utils'
+import { utils } from 'jm-utils'
+import _ from 'lodash'
 
-let expect = chai.expect
-let ecs = _ecs()
-let logger = log.getLogger('player')
+let game = new Game({interval: 100})
+let logger = log.getLogger('game')
 
-let area = ecs.createArea()
+let area = game.createArea()
 area.id = 1
 let em = area.em
 let player = em.createEntity('player')
 player.id = 2
 
-describe('ecs', function () {
+describe('game', function () {
   it('area.toJSON', function (done) {
     logger.info(utils.formatJSON(area.toJSON()))
     done()
