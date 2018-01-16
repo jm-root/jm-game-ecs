@@ -17,8 +17,8 @@ let logger = log.getLogger('jm-game-ecs')
 
 const State = {
   closed: 0, // 关闭
-  open: 1,   // 开放
-  paused: 2  // 暂停
+  open: 1, // 开放
+  paused: 2 // 暂停
 }
 
 /**
@@ -65,13 +65,14 @@ class Game extends ECS {
    * @param nDelta 单位毫秒
    */
   update (fDelta = 0, nDelta) {
-    if (this.state !== State.open) return
+    if (this.state !== State.open) return true
     nDelta || (nDelta = parseInt(fDelta * 1000))
     let areas = this.areas
     for (let i in areas) {
       let e = areas[i]
       e.em.emit('update', fDelta, nDelta)
     }
+    return true
   }
 
   /**
@@ -149,9 +150,9 @@ class Game extends ECS {
   /**
    * create an area
    * @param opts
-   * @returns {*}
+   * @returns {Promise}
    */
-  createArea (opts) {
+  createArea (opts = {}) {
     let areas = this.areas
     let em = this.em()
     if (!em.entityType('area')) {
@@ -171,14 +172,21 @@ class Game extends ECS {
     let e = em.createEntity('area', opts)
     areas.push(e)
     em.area = e
-    this.emit('addArea', e)
-    logger.info('area added: %s', utils.formatJSON(e.toJSON()))
+    this.emit('addArea', e, opts)
     e.on('remove', function () {
       this.emit('removeArea', e)
       _.pull(this.areas, e)
-      logger.info('area removed: %s', utils.formatJSON(e.toJSON()))
+      logger.info('remove area: %s', utils.formatJSON(e.toJSON()))
     }.bind(this))
-    return e
+    return Promise.resolve()
+      .then(function () {
+        if (e.init) return e.init(opts)
+        return e
+      })
+      .then(function () {
+        logger.info('add area: %s', utils.formatJSON(e.toJSON()))
+        return e
+      })
   }
 
   /**

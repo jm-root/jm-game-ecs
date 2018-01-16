@@ -83,26 +83,31 @@ var C = function (_ECS$C) {
       }.bind(e)
     });
 
-    e.em.on('addEntity', function (o) {
-      o.area = this;
-      if (o.type === 'player') {
-        var player = o;
-        this.players.push(player);
-        this.emit('addPlayer', player);
-        logger.debug('add player: %s', _jmUtils.utils.formatJSON(player.toJSON()));
-      }
-    }.bind(e)).on('removeEntity', function (o) {
-      if (o.type === 'player') {
-        var player = o;
-        _lodash2.default.pull(this.players, player);
-        this.emit('removePlayer', player);
-        logger.debug('remove player: %s', _jmUtils.utils.formatJSON(player.toJSON()));
-      }
-    }.bind(e)).on('update', function (fDelta, nDelta) {
+    e.em.on('update', function (fDelta, nDelta) {
       if (this.state !== State.open) return;
       this.runTime += nDelta;
       this.ticks++;
     }.bind(e));
+
+    e.createPlayer = function () {
+      var opts = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+
+      var player = this.em.createEntity('player', opts);
+      this.emit('addPlayer', player, opts);
+      this.players.push(player);
+      player.on('remove', function () {
+        this.emit('removePlayer', player);
+        _lodash2.default.pull(this.players, player);
+        logger.debug('remove player: %s', _jmUtils.utils.formatJSON(player.toJSON()));
+      }.bind(this));
+      return Promise.resolve().then(function () {
+        if (player.init) return player.init(opts);
+        return player;
+      }).then(function () {
+        logger.debug('add player: %s', _jmUtils.utils.formatJSON(player.toJSON()));
+        return player;
+      });
+    };
 
     e.findPlayer = function (id) {
       return _lodash2.default.find(this.players, { id: id });
@@ -312,13 +317,14 @@ var Game = function (_ECS) {
       var fDelta = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : 0;
       var nDelta = arguments[1];
 
-      if (this.state !== State.open) return;
+      if (this.state !== State.open) return true;
       nDelta || (nDelta = parseInt(fDelta * 1000));
       var areas = this.areas;
       for (var i in areas) {
         var e = areas[i];
         e.em.emit('update', fDelta, nDelta);
       }
+      return true;
     }
 
     /**
@@ -408,12 +414,14 @@ var Game = function (_ECS) {
     /**
      * create an area
      * @param opts
-     * @returns {*}
+     * @returns {Promise}
      */
 
   }, {
     key: 'createArea',
-    value: function createArea(opts) {
+    value: function createArea() {
+      var opts = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
+
       var areas = this.areas;
       var em = this.em();
       if (!em.entityType('area')) {
@@ -433,14 +441,19 @@ var Game = function (_ECS) {
       var e = em.createEntity('area', opts);
       areas.push(e);
       em.area = e;
-      this.emit('addArea', e);
-      logger.info('area added: %s', _jmUtils.utils.formatJSON(e.toJSON()));
+      this.emit('addArea', e, opts);
       e.on('remove', function () {
         this.emit('removeArea', e);
         _lodash2.default.pull(this.areas, e);
-        logger.info('area removed: %s', _jmUtils.utils.formatJSON(e.toJSON()));
+        logger.info('remove area: %s', _jmUtils.utils.formatJSON(e.toJSON()));
       }.bind(this));
-      return e;
+      return Promise.resolve().then(function () {
+        if (e.init) return e.init(opts);
+        return e;
+      }).then(function () {
+        logger.info('add area: %s', _jmUtils.utils.formatJSON(e.toJSON()));
+        return e;
+      });
     }
 
     /**

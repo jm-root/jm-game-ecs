@@ -2,11 +2,13 @@ if (typeof module !== 'undefined' && module.exports) {
   require('../')
 }
 var game = jm.game()
-var area = game.createArea()
-var em = area.em
-var player = em.createEntity('player')
+console.info('game: %s', JSON.stringify(game))
 
-console.info('game: %j', game)
-console.info('em: %j', em)
-console.info('area: %j', area)
-console.info('player: %j', player)
+game.createArea()
+  .then(function (area) {
+    console.info('area: %j', JSON.stringify(area))
+    return area.createPlayer()
+  })
+  .then(function (player) {
+    console.info('player: %j', JSON.stringify(player))
+  })

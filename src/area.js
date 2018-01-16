@@ -7,8 +7,8 @@ let logger = log.getLogger('area')
 
 const State = {
   closed: 0, // 关闭
-  open: 1,   // 开放
-  paused: 2   // 暂停
+  open: 1, // 开放
+  paused: 2 // 暂停
 }
 
 class C extends ECS.C {
@@ -52,28 +52,31 @@ class C extends ECS.C {
     })
 
     e.em
-      .on('addEntity', function (o) {
-        o.area = this
-        if (o.type === 'player') {
-          let player = o
-          this.players.push(player)
-          this.emit('addPlayer', player)
-          logger.debug('add player: %s', utils.formatJSON(player.toJSON()))
-        }
-      }.bind(e))
-      .on('removeEntity', function (o) {
-        if (o.type === 'player') {
-          let player = o
-          _.pull(this.players, player)
-          this.emit('removePlayer', player)
-          logger.debug('remove player: %s', utils.formatJSON(player.toJSON()))
-        }
-      }.bind(e))
       .on('update', function (fDelta, nDelta) {
         if (this.state !== State.open) return
         this.runTime += nDelta
         this.ticks++
       }.bind(e))
+
+    e.createPlayer = function (opts = {}) {
+      let player = this.em.createEntity('player', opts)
+      this.emit('addPlayer', player, opts)
+      this.players.push(player)
+      player.on('remove', function () {
+        this.emit('removePlayer', player)
+        _.pull(this.players, player)
+        logger.debug('remove player: %s', utils.formatJSON(player.toJSON()))
+      }.bind(this))
+      return Promise.resolve()
+        .then(function () {
+          if (player.init) return player.init(opts)
+          return player
+        })
+        .then(function () {
+          logger.debug('add player: %s', utils.formatJSON(player.toJSON()))
+          return player
+        })
+    }
 
     e.findPlayer = function (id) {
       return _.find(this.players, {id})

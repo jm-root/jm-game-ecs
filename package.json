@@ -1,6 +1,6 @@
 {
   "name": "jm-game-ecs",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "description": "ecs for jm-game",
   "main": "./lib/index",
   "scripts": {
