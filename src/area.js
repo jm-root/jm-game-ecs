@@ -1,7 +1,6 @@
 import ECS from 'jm-ecs'
 import log from 'jm-logger'
 import { utils } from 'jm-utils'
-import _ from 'lodash'
 
 let logger = log.getLogger('area')
 
@@ -64,7 +63,8 @@ class C extends ECS.C {
       this.players.push(player)
       player.on('remove', function () {
         this.emit('removePlayer', player)
-        _.pull(this.players, player)
+        let idx = this.players.indexOf(player)
+        if (idx !== -1) this.players.splice(idx, 1)
         logger.debug('remove player: %s', utils.formatJSON(player.toJSON()))
       }.bind(this))
       return Promise.resolve()
@@ -79,7 +79,11 @@ class C extends ECS.C {
     }
 
     e.findPlayer = function (id) {
-      return _.find(this.players, {id})
+      for (let i in this.players) {
+        let player = this.players[i]
+        if (player.id === id) return player
+      }
+      return null
     }
 
     e.open = function () {

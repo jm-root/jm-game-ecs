@@ -11,7 +11,6 @@ import Player from './player'
 import ECS from 'jm-ecs'
 import log from 'jm-logger'
 import { utils } from 'jm-utils'
-import _ from 'lodash'
 
 let logger = log.getLogger('jm-game-ecs')
 
@@ -41,6 +40,21 @@ class Game extends ECS {
     this.state = State.closed
     this.areas = []
     this.uses([{class: Area}, {class: Player}])
+    this.entityTypes = {
+      area: {
+        components: {
+          area: {}
+        }
+      },
+      player: {
+        components: {
+          player: {}
+        }
+      }
+    }
+    this.on('em', function (em) {
+      em.addEntityTypes(this.entityTypes)
+    }.bind(this))
     if (!opts.disableAutoOpen) {
       this.open(opts)
     }
@@ -155,27 +169,14 @@ class Game extends ECS {
   createArea (opts = {}) {
     let areas = this.areas
     let em = this.em()
-    if (!em.entityType('area')) {
-      em.addEntityType('area', {
-        components: {
-          area: {}
-        }
-      })
-    }
-    if (!em.entityType('player')) {
-      em.addEntityType('player', {
-        components: {
-          player: {}
-        }
-      })
-    }
     let e = em.createEntity('area', opts)
     areas.push(e)
     em.area = e
     this.emit('addArea', e, opts)
     e.on('remove', function () {
       this.emit('removeArea', e)
-      _.pull(this.areas, e)
+      let idx = this.areas.indexOf(e)
+      if (idx !== -1) this.areas.splice(idx, 1)
       logger.info('remove area: %s', utils.formatJSON(e.toJSON()))
     }.bind(this))
     return Promise.resolve()
@@ -195,7 +196,11 @@ class Game extends ECS {
    * @returns {*}
    */
   findArea (id) {
-    return _.find(this.areas, {id})
+    for (let i in this.areas) {
+      let area = this.areas[i]
+      if (area.id === id) return area
+    }
+    return null
   }
 
   /**

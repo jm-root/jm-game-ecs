@@ -1,6 +1,6 @@
 {
   "name": "jm-game-ecs",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "description": "ecs for jm-game",
   "main": "./lib/index",
   "scripts": {
@@ -23,7 +23,7 @@
   },
   "homepage": "https://github.com/jm-root/jm-game-ecs",
   "dependencies": {
-    "jm-ecs": "^1.0.4"
+    "jm-ecs": "^1.0.5"
   },
   "devDependencies": {
     "babel-cli": "^6.24.1",
@@ -48,7 +48,6 @@
     "gulp-sequence": "^0.4.6",
     "gulp-uglify": "^3.0.0",
     "gulp-util": "^3.0.8",
-    "jm-utils": "^1.0.1",
     "jshint": "^2.9.4",
     "mocha": "^3.4.2"
   }
