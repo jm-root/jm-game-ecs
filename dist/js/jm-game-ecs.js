@@ -3056,6 +3056,40 @@ Object.defineProperty(exports, "__esModule", {
 
 var _typeof = typeof Symbol === "function" && typeof Symbol.iterator === "symbol" ? function (obj) { return typeof obj; } : function (obj) { return obj && typeof Symbol === "function" && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj; };
 
+var argsClass = '[object Arguments]';
+var arrayClass = '[object Array]';
+var boolClass = '[object Boolean]';
+var dateClass = '[object Date]';
+var funcClass = '[object Function]';
+var numberClass = '[object Number]';
+var objectClass = '[object Object]';
+var regexpClass = '[object RegExp]';
+var stringClass = '[object String]';
+
+/** Used to identify object classifications that `cloneDeep` supports */
+var cloneableClasses = {};
+cloneableClasses[funcClass] = false;
+cloneableClasses[argsClass] = true;
+cloneableClasses[arrayClass] = true;
+cloneableClasses[boolClass] = true;
+cloneableClasses[dateClass] = true;
+cloneableClasses[numberClass] = true;
+cloneableClasses[objectClass] = true;
+cloneableClasses[regexpClass] = true;
+cloneableClasses[stringClass] = true;
+
+var ctorByClass = {};
+ctorByClass[arrayClass] = Array;
+ctorByClass[boolClass] = Boolean;
+ctorByClass[dateClass] = Date;
+ctorByClass[objectClass] = Object;
+ctorByClass[numberClass] = Number;
+ctorByClass[regexpClass] = RegExp;
+ctorByClass[stringClass] = String;
+
+/** Used to match regexp flags from their coerced string values */
+var reFlags = /\w*$/;
+
 var cloneDeep = function cloneDeep(obj) {
   if ((typeof obj === 'undefined' ? 'undefined' : _typeof(obj)) !== 'object' || !obj) return obj;
   if (Array.isArray(obj)) {
@@ -3065,6 +3099,24 @@ var cloneDeep = function cloneDeep(obj) {
     });
     return _ret;
   }
+  var className = toString.call(obj);
+  if (!cloneableClasses[className]) {
+    return obj;
+  }
+  var ctor = ctorByClass[className];
+  switch (className) {
+    case boolClass:
+    case dateClass:
+      return new ctor(+obj);
+
+    case numberClass:
+    case stringClass:
+      return new ctor(obj);
+
+    case regexpClass:
+      return ctor(obj.source, reFlags.exec(obj));
+  }
+
   var ret = {};
   var keys = Object.keys(obj);
   keys.forEach(function (key) {
